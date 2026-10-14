@@ -1,0 +1,545 @@
+name: Privacera Manager Install
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_env_type:
+        description: 'Target deployment platform (AWS only)'
+        required: true
+        default: 'AWS'
+        type: choice
+        options:
+          - AWS
+      aws_region:
+        description: 'AWS region for deployment'
+        required: true
+        default: 'us-east-1'
+        type: string
+      skip_helm_validation:
+        description: 'Skip Helm chart validation'
+        required: false
+        default: false
+        type: boolean
+      debug_mode:
+        description: 'Enable debug logging'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
+
+jobs:
+  install:
+    name: Install Privacera Manager
+    runs-on: [self-hosted, k8s, linux]  # Use exact labels from working repository
+    
+    # Use secrets for sensitive data
+    env:
+      PRIVACERA_HUB_USER: ${{ secrets.PRIVACERA_HUB_USER }}
+      PRIVACERA_HUB_PASSWORD: ${{ secrets.PRIVACERA_HUB_PASSWORD }}
+      ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+      GLOBAL_DEFAULT_SECRETS_KEYSTORE_PASSWORD: ${{ secrets.GLOBAL_DEFAULT_SECRETS_KEYSTORE_PASSWORD }}
+      # Configuration loaded from variables.env
+      PRIVACERA_VERSION: ""
+      PRIVACERA_HUB_SERVER: ""
+      DEPLOYMENT_ENV_NAME: ""
+      # Manual pipeline variables  
+      DEPLOYMENT_ENV_TYPE: ${{ github.event.inputs.deployment_env_type }}
+      AWS_REGION: ${{ github.event.inputs.aws_region }}
+      SKIP_HELM_VALIDATION: ${{ github.event.inputs.skip_helm_validation }}
+      DEBUG_MODE: ${{ github.event.inputs.debug_mode }}
+      # Derived variables (set after loading variables.env)
+      PRIV_MGR_IMAGE: ""
+      PRIV_MGR_PACKAGE: ""
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load configuration from variables.env
+        run: |
+          echo "🔧 Loading configuration from variables.env..."
+          
+          # Check if variables.env exists
+          if [ -f "variables.env" ]; then
+            echo "✅ Found variables.env file"
+          else
+            echo "❌ ERROR: variables.env file not found!"
+            echo "Please ensure variables.env exists with PRIVACERA_VERSION and PRIVACERA_HUB_SERVER"
+            exit 1
+          fi
+          
+          # Source the variables.env file
+          source variables.env
+          
+          # Set deployment environment name (defaults to branch name)
+          DEPLOYMENT_ENV_NAME="${DEPLOYMENT_ENV_NAME:-${{ github.ref_name }}}"
+          
+          # Export variables for subsequent steps
+          echo "PRIVACERA_VERSION=$PRIVACERA_VERSION" >> $GITHUB_ENV
+          echo "PRIVACERA_HUB_SERVER=$PRIVACERA_HUB_SERVER" >> $GITHUB_ENV
+          echo "DEPLOYMENT_ENV_NAME=$DEPLOYMENT_ENV_NAME" >> $GITHUB_ENV
+          echo "PRIV_MGR_IMAGE=$PRIVACERA_HUB_SERVER/privacera-manager:$PRIVACERA_VERSION" >> $GITHUB_ENV
+          echo "PRIV_MGR_PACKAGE=https://privacera-releases.s3.us-east-1.amazonaws.com/privacera-manager/$PRIVACERA_VERSION/privacera-manager.tar.gz" >> $GITHUB_ENV
+          
+          echo "✅ Configuration loaded successfully"
+          echo "   - PRIVACERA_VERSION: $PRIVACERA_VERSION"
+          echo "   - PRIVACERA_HUB_SERVER: $PRIVACERA_HUB_SERVER"
+          echo "   - DEPLOYMENT_ENV_NAME: $DEPLOYMENT_ENV_NAME"
+          echo "   - PRIV_MGR_IMAGE: $PRIVACERA_HUB_SERVER/privacera-manager:$PRIVACERA_VERSION"
+
+      - name: Validate configuration
+        run: |
+          echo "Validating configuration for Privacera Manager installation..."
+          
+          if [ -z "$PRIVACERA_VERSION" ]; then
+            echo "❌ ERROR: PRIVACERA_VERSION is not set in variables.env"
+            exit 1
+          fi
+          
+          if [ -z "$PRIVACERA_HUB_SERVER" ]; then
+            echo "❌ ERROR: PRIVACERA_HUB_SERVER is not set in variables.env"
+            exit 1
+          fi
+          
+          if [ -z "$DEPLOYMENT_ENV_NAME" ]; then
+            echo "❌ ERROR: DEPLOYMENT_ENV_NAME could not be determined"
+            exit 1
+          fi
+          
+          echo "✅ All required configuration is set"
+
+      - name: Set up kubeconfig
+        run: |
+          echo "Setting up kubeconfig..."
+          # First try to use existing kubeconfig if available
+          if [ -f "$HOME/.kube/config" ]; then
+            echo "Using existing kubeconfig from $HOME/.kube/config"
+            export KUBECONFIG=$HOME/.kube/config
+          elif [ -f "${GITHUB_WORKSPACE}/kubeconfig" ]; then
+            echo "Using kubeconfig from repository"
+            export KUBECONFIG=${GITHUB_WORKSPACE}/kubeconfig
+          elif [ -n "${{ secrets.KUBECONFIG_B64 }}" ]; then
+            echo "Using kubeconfig from secret..."
+            echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > kubeconfig
+            export KUBECONFIG=$PWD/kubeconfig
+          else
+            echo "No kubeconfig found, will check if kubectl is already configured"
+          fi
+
+      - name: Install kubectl
+        run: |
+          echo "Installing kubectl..."
+          KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
+          echo "Latest stable kubectl version: ${KUBECTL_VERSION}"
+          curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          echo "kubectl installed successfully"
+          kubectl version --client
+
+      - name: Check current kubectl context
+        run: |
+          echo "Checking kubectl configuration..."
+          # Try different kubeconfig locations
+          if [ -f "$HOME/.kube/config" ]; then
+            export KUBECONFIG=$HOME/.kube/config
+          elif [ -f "${GITHUB_WORKSPACE}/kubeconfig" ]; then
+            export KUBECONFIG=${GITHUB_WORKSPACE}/kubeconfig
+          elif [ -f "$PWD/kubeconfig" ]; then
+            export KUBECONFIG=$PWD/kubeconfig
+          fi
+          
+          echo "Current kubectl context:"
+          kubectl config current-context || echo "No context found, will try default"
+
+      - name: Validate required secrets
+        run: |
+          echo "Validating required secrets..."
+          MISSING_SECRETS=""
+
+          if [ -z "$PRIVACERA_HUB_USER" ]; then
+            MISSING_SECRETS="${MISSING_SECRETS} PRIVACERA_HUB_USER"
+          fi
+          if [ -z "$PRIVACERA_HUB_PASSWORD" ]; then
+            MISSING_SECRETS="${MISSING_SECRETS} PRIVACERA_HUB_PASSWORD"
+          fi
+          if [ -z "$ANSIBLE_VAULT_PASSWORD" ]; then
+            MISSING_SECRETS="${MISSING_SECRETS} ANSIBLE_VAULT_PASSWORD"
+          fi
+          if [ -z "$GLOBAL_DEFAULT_SECRETS_KEYSTORE_PASSWORD" ]; then
+            MISSING_SECRETS="${MISSING_SECRETS} GLOBAL_DEFAULT_SECRETS_KEYSTORE_PASSWORD"
+          fi
+          if [ -z "$EKS_CLUSTER_NAME" ]; then
+            MISSING_SECRETS="${MISSING_SECRETS} EKS_CLUSTER_NAME"
+          fi
+          
+          if [ -n "${MISSING_SECRETS}" ]; then
+            echo "❌ ERROR: The following required secrets are not set:"
+            for secret in ${MISSING_SECRETS}; do
+              echo "  - ${secret}"
+            done
+            echo ""
+            echo "Please set these secrets in GitHub repository settings → Secrets and variables → Actions"
+            exit 1
+          fi
+          
+          echo "✅ All required secrets are set"
+
+      - name: Load variables from variables.env
+        run: |
+          echo "Loading default variables from variables.env..."
+          if [ -f "variables.env" ]; then
+            set -a
+            source variables.env
+            set +a
+            echo "✅ Variables loaded from variables.env"
+          else
+            echo "⚠️ variables.env file not found, using workflow inputs only"
+          fi
+
+      - name: Display configuration
+        run: |
+          echo "=== AWS Deployment Configuration ==="
+          echo "Deployment Environment Type: ${DEPLOYMENT_ENV_TYPE}"
+          echo "Deployment Environment Name: ${DEPLOYMENT_ENV_NAME}"
+          echo "AWS Region: ${AWS_REGION}"
+          echo "Privacera Version: ${PRIVACERA_VERSION}"
+          echo "Privacera Hub Server: ${PRIVACERA_HUB_SERVER}"
+          echo "Debug Mode: ${DEBUG_MODE}"
+          echo "Skip Helm Validation: ${SKIP_HELM_VALIDATION}"
+          echo "Privacera Manager Image: ${PRIV_MGR_IMAGE}"
+          echo "Privacera Manager Package: ${PRIV_MGR_PACKAGE}"
+          echo "===================================="
+
+
+      - name: Login to Privacera Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.PRIVACERA_HUB_SERVER }}
+          username: ${{ secrets.PRIVACERA_HUB_USER }}
+          password: ${{ secrets.PRIVACERA_HUB_PASSWORD }}
+
+      - name: Install Helm
+        run: |
+          echo "Installing Helm..."
+          curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+          helm version
+
+      - name: Install additional dependencies
+        run: |
+          echo "Installing additional dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y curl tar gzip wget openssl hostname sudo unzip python3 python3-pip
+          
+          # Install AWS CLI for self-hosted runners
+          echo "Installing AWS CLI..."
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+          aws --version
+          
+          # Install Ansible
+          pip3 install ansible-core>=2.12.0
+          ansible --version
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ github.event.inputs.aws_region }}
+
+      - name: Setup Kubernetes context
+        run: |
+          echo "Setting up Kubernetes context using AWS EKS..."
+          
+          # Update kubeconfig for EKS cluster
+          aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER_NAME}
+          
+          echo "Current kubectl context:"
+          kubectl config current-context
+          
+          echo "Available contexts:"
+          kubectl config get-contexts
+          
+          echo "Cluster info:"
+          kubectl cluster-info
+          
+          echo "✅ Kubernetes context is ready"
+
+      - name: Create namespace
+        run: |
+          echo "Creating namespace '${DEPLOYMENT_ENV_NAME}' if it doesn't exist..."
+          kubectl create namespace ${DEPLOYMENT_ENV_NAME} --dry-run=client -o yaml | kubectl apply -f - --validate=false
+          echo "Namespace '${DEPLOYMENT_ENV_NAME}' is ready."
+
+      - name: Download installation scripts
+        run: |
+          echo "Downloading installation scripts..."
+          curl -s https://raw.githubusercontent.com/privacera/privacera-installation-scripts/refs/heads/main/base-install/install_pm.sh -o install_pm.sh
+          curl -s https://raw.githubusercontent.com/privacera/privacera-installation-scripts/refs/heads/main/base-install/bootstrap_privacera.sh -o bootstrap_privacera.sh
+          
+          # Download AWS-specific scripts
+          echo "Downloading AWS-specific scripts..."
+          curl -s https://raw.githubusercontent.com/privacera/privacera-installation-scripts/refs/heads/main/base-install/self-managed/aws/aws_pm_config_env.sh -o aws_pm_config_env.sh
+          
+          chmod a+x *.sh
+
+      - name: Configure environment variables
+        run: |
+          echo "Configuring environment variables..."
+          
+          # Move to workspace directory to ensure files are created in the right place
+          cd "${GITHUB_WORKSPACE}"
+          
+          # Configure AWS environment variables
+          CONFIG_FILE="aws_pm_config_env.sh"
+          echo "# Environment Configuration" > ${CONFIG_FILE}
+          echo "DEPLOYMENT_ENV_TYPE=\"${DEPLOYMENT_ENV_TYPE}\"" >> ${CONFIG_FILE}
+          echo "DEPLOYMENT_ENV_NAME=\"${DEPLOYMENT_ENV_NAME}\"" >> ${CONFIG_FILE}
+          echo "PRIV_MGR_IMAGE=\"${PRIV_MGR_IMAGE}\"" >> ${CONFIG_FILE}
+          echo "PRIV_MGR_PACKAGE=\"${PRIV_MGR_PACKAGE}\"" >> ${CONFIG_FILE}
+          echo "PRIVACERA_HUB_USER=\"${PRIVACERA_HUB_USER}\"" >> ${CONFIG_FILE}
+          echo "PRIVACERA_HUB_PASSWORD=\"${PRIVACERA_HUB_PASSWORD}\"" >> ${CONFIG_FILE}
+          echo "ANSIBLE_VAULT_PASSWORD=\"${ANSIBLE_VAULT_PASSWORD}\"" >> ${CONFIG_FILE}
+          echo "GLOBAL_DEFAULT_SECRETS_KEYSTORE_PASSWORD=\"${GLOBAL_DEFAULT_SECRETS_KEYSTORE_PASSWORD}\"" >> ${CONFIG_FILE}
+          echo "AWS_REGION=\"${AWS_REGION}\"" >> ${CONFIG_FILE}
+          echo "" >> ${CONFIG_FILE}
+          echo "# Export all variables" >> ${CONFIG_FILE}
+          echo "export DEPLOYMENT_ENV_TYPE DEPLOYMENT_ENV_NAME PRIV_MGR_IMAGE PRIV_MGR_PACKAGE" >> ${CONFIG_FILE}
+          echo "export PRIVACERA_HUB_USER PRIVACERA_HUB_PASSWORD ANSIBLE_VAULT_PASSWORD" >> ${CONFIG_FILE}
+          echo "export GLOBAL_DEFAULT_SECRETS_KEYSTORE_PASSWORD AWS_REGION" >> ${CONFIG_FILE}
+
+          echo "Using configuration file: ${CONFIG_FILE}"
+
+      - name: Run installation script
+        run: |
+          echo "Setting up Privacera Manager..."
+          # Create workspace directory and set HOME
+          export HOME="${GITHUB_WORKSPACE}"
+          cd "${HOME}"
+
+          # Use AWS config file
+          CONFIG_FILE="aws_pm_config_env.sh"
+
+          echo "Using config file: ${CONFIG_FILE}"
+          
+          # Verify config file exists
+          if [ ! -f "${CONFIG_FILE}" ]; then
+            echo "ERROR: Config file ${CONFIG_FILE} not found!"
+            ls -la *.sh
+            exit 1
+          fi
+
+          # Run installation script
+          echo "Running installation script..."
+          bash install_pm.sh ${CONFIG_FILE}
+
+          # Run bootstrap script
+          echo "Running bootstrap script..."
+          bash bootstrap_privacera.sh ${CONFIG_FILE}
+
+          # List the generated files
+          echo "Checking generated files:"
+          ls -la ${HOME}/privacera/privacera-manager/config/custom-vars/
+          ls -la ${HOME}/privacera/privacera-manager/config/
+
+          # Check and use custom-vars from repo if they exist
+          if [ -d "${GITHUB_WORKSPACE}/custom-vars" ] && [ -n "$(ls -A ${GITHUB_WORKSPACE}/custom-vars)" ]; then
+            echo "Found custom-vars in repo, using them instead of generated ones..."
+            rm -rf ${HOME}/privacera/privacera-manager/config/custom-vars/*
+            cp -rv ${GITHUB_WORKSPACE}/custom-vars/* ${HOME}/privacera/privacera-manager/config/custom-vars/
+            echo "Custom vars after replacement:"
+            ls -la ${HOME}/privacera/privacera-manager/config/custom-vars/
+          else
+            echo "No custom-vars found in repo, using generated ones..."
+            
+            # Remove unwanted files from generated custom-vars
+            echo "Removing unwanted files..."
+            rm -f ${HOME}/privacera/privacera-manager/config/custom-vars/vars.privacera-secrets.yml
+            rm -f ${HOME}/privacera/privacera-manager/config/custom-vars/vars.encrypt.secrets.yml
+            
+            echo "Removed vars.privacera-secrets.yml and vars.encrypt.secrets.yml"
+            
+            ls -la ${HOME}/privacera/privacera-manager/config/custom-vars/
+          fi
+
+          # Check and use custom-properties from repo if they exist
+          if [ -d "${GITHUB_WORKSPACE}/custom-properties" ] && [ -n "$(ls -A ${GITHUB_WORKSPACE}/custom-properties)" ]; then
+            echo "Found custom-properties in repo, using them instead of generated ones..."
+            rm -rf ${HOME}/privacera/privacera-manager/config/custom-properties/*
+            cp -rv ${GITHUB_WORKSPACE}/custom-properties/* ${HOME}/privacera/privacera-manager/config/custom-properties/
+            echo "Custom properties after replacement:"
+            ls -la ${HOME}/privacera/privacera-manager/config/custom-properties/
+          else
+            echo "No custom-properties found in repo, using generated ones..."
+            ls -la ${HOME}/privacera/privacera-manager/config/custom-properties/
+          fi
+
+          # Copy the generated files to a location we can artifact
+          mkdir -p ${GITHUB_WORKSPACE}/privacera-manager
+          if [ -d "${HOME}/privacera/privacera-manager" ]; then
+            cp -rv ${HOME}/privacera/privacera-manager/* ${GITHUB_WORKSPACE}/privacera-manager/
+            echo "✅ Generated files copied successfully"
+          else
+            echo "❌ ERROR: Generated privacera-manager directory not found at ${HOME}/privacera/privacera-manager"
+            exit 1
+          fi          
+
+      - name: Generate Helm charts
+        run: |
+          echo "Generating Helm charts..."
+          cd ${GITHUB_WORKSPACE}/privacera-manager
+          echo "Current directory structure before setup:"
+          pwd
+          ls -la
+          echo "Running setup script..."
+          ./privacera-manager.sh setup
+          echo "Current directory structure after setup:"
+          ls -la
+          echo "Helm charts directory content:"
+          ls -la output/kubernetes/helm/ || echo "Helm charts directory not found at output/kubernetes/helm/"
+  
+          # Create output directory and copy generated charts
+          cd "${GITHUB_WORKSPACE}"
+          mkdir -p helm-charts-output
+          echo "Copying helm charts..."
+          cp -rv ${GITHUB_WORKSPACE}/privacera-manager/output/kubernetes/helm/* helm-charts-output/ || echo "Failed to copy helm charts"
+  
+          echo "Final output directory contents:"
+          ls -la helm-charts-output/          
+
+      - name: Fix deprecated Kubernetes API versions
+        run: |
+          echo "🔧 Fixing deprecated Kubernetes API versions in Helm charts..."
+          if [ -d "privacera-manager/output/kubernetes/helm" ]; then
+            find privacera-manager/output/kubernetes/helm/ -name "*.yaml" -o -name "*.yml" | while read -r file; do
+              if [ -f "$file" ]; then
+                # Fix RoleBinding API version (rbac.authorization.k8s.io/v1beta1 → v1)
+                if grep -q "rbac.authorization.k8s.io/v1beta1" "$file"; then
+                  echo "Updating RoleBinding API version in: $file"
+                  sed -i 's|rbac.authorization.k8s.io/v1beta1|rbac.authorization.k8s.io/v1|g' "$file"
+                fi
+                
+                # Fix PodDisruptionBudget API version (policy/v1beta1 → policy/v1)
+                if grep -q "policy/v1beta1" "$file"; then
+                  echo "Updating PodDisruptionBudget API version in: $file"
+                  sed -i 's|policy/v1beta1|policy/v1|g' "$file"
+                fi
+                
+                # Fix Deployment API version (extensions/v1beta1 → apps/v1)
+                if grep -q "extensions/v1beta1" "$file" && (grep -q "kind: Deployment\|kind: ReplicaSet\|kind: DaemonSet" "$file"); then
+                  echo "Updating Deployment API version in: $file"
+                  sed -i 's|extensions/v1beta1|apps/v1|g' "$file"
+                fi
+                
+                # Fix Ingress API version (networking.k8s.io/v1beta1 → networking.k8s.io/v1)
+                if grep -q "networking.k8s.io/v1beta1" "$file" && grep -q "kind: Ingress" "$file"; then
+                  echo "Updating Ingress API version in: $file"
+                  sed -i 's|networking.k8s.io/v1beta1|networking.k8s.io/v1|g' "$file"
+                fi
+              fi
+            done
+            echo "✅ API version updates completed"
+            
+            # Show which files were updated
+            echo "📋 Verification of updated API versions:"
+            find privacera-manager/output/kubernetes/helm/ -name "*.yaml" -o -name "*.yml" | xargs grep -l "rbac.authorization.k8s.io/v1\|policy/v1\|apps/v1\|networking.k8s.io/v1" | head -10 || echo "No API version matches found"
+          else
+            echo "⚠️ Helm charts directory not found, skipping API version fixes"
+          fi
+
+      - name: Deploy to Kubernetes
+        run: |
+          echo "Running upgrade..."
+          ls -la
+          cd ${GITHUB_WORKSPACE}/privacera-manager
+          ls -la  # Debug: List directory contents
+           
+          #chmod +x ./pm_with_helm.sh  # Ensure script is executable
+          # Install all Privacera Manager components using Helm (MariaDB, Solr, Zookeeper, Portal, Ranger, etc.)
+          #./pm_with_helm.sh install
+          
+
+          # AWS deployment logic
+          # Source environment variables
+          #source ${GITHUB_WORKSPACE}/aws_pm_config_env.sh
+          
+          echo "Running setup and installation..."          
+          #./privacera-manager.sh setup && 
+          chmod +x ./pm_with_helm.sh  # Ensure script is executable
+          ./pm_with_helm.sh upgrade
+          
+          # Check if ALB ingress is configured and handle ALB URL update
+          if [ -f "${HOME}/privacera/privacera-manager/config/custom-vars/vars.aws.alb.ingress.yml" ]; then
+            echo "AWS ALB ingress configuration detected..."
+            
+            # Wait for ingress to be created and get its URL
+            echo "Waiting for ingress resource to be available..."
+            for i in {1..30}; do
+              echo "Attempt $i: Checking ingress..."
+              if AWS_ALB_EXTERNAL_URL=$(kubectl -n ${DEPLOYMENT_ENV_NAME} get ingress privacera-ingress-resource -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null); then
+                echo "AWS ALB External URL: ${AWS_ALB_EXTERNAL_URL}"
+                
+                if [ -n "${AWS_ALB_EXTERNAL_URL}" ]; then
+                  echo "Updating ALB URL in custom-vars/vars.aws.alb.ingress.yml..."
+                  
+                  # Update the ALB URL in the configuration
+                  sed -i.bak '/^AWS_ALB_EXTERNAL_URL:/d' ${HOME}/privacera/privacera-manager/config/custom-vars/vars.aws.alb.ingress.yml
+                  echo "AWS_ALB_EXTERNAL_URL: \"${AWS_ALB_EXTERNAL_URL}\"" >> ${HOME}/privacera/privacera-manager/config/custom-vars/vars.aws.alb.ingress.yml
+                  echo "✅ ALB URL updated successfully"
+                  break
+                fi
+              fi
+              
+              if [ $i -eq 30 ]; then
+                echo "⚠️ Warning: Could not get ALB URL after 30 attempts"
+              else
+                echo "Ingress not ready yet, waiting 10 seconds..."
+                sleep 10
+              fi
+            done
+          fi
+          
+          echo "Displaying service URLs..."
+          cat ${HOME}/privacera/privacera-manager/output/service-urls.txt || echo "⚠️ Warning: service-urls.txt not found"
+          
+          echo "Running post-installation steps..."
+          ./privacera-manager.sh post-install
+          
+          echo "✅ AWS deployment completed successfully"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: privacera-install-artifacts
+          path: |
+            ~/privacera/privacera-manager/output/service-urls.txt
+          retention-days: 7
+
+      - name: Display deployment status
+        run: |
+          echo "=== Deployment Summary ==="
+          echo "Environment: ${DEPLOYMENT_ENV_NAME}"
+          echo "Platform: ${DEPLOYMENT_ENV_TYPE}"
+          echo "Privacera Version: ${PRIVACERA_VERSION}"
+          echo "Namespace: ${DEPLOYMENT_ENV_NAME}"
+          echo "=========================="
+          
+          # Display service URLs if available
+          if [ -f "${HOME}/privacera/privacera-manager/output/service-urls.txt" ]; then
+            echo "Service URLs:"
+            cat ${HOME}/privacera/privacera-manager/output/service-urls.txt
+          fi
+          
+          # Display pod status
+          echo "Pod status in namespace ${DEPLOYMENT_ENV_NAME}:"
+          kubectl get pods -n ${DEPLOYMENT_ENV_NAME} || echo "Unable to get pod status" 

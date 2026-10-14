@@ -1,0 +1,69 @@
+#This contains the variables that needs to be configured for setting up Snowflake PolicySync
+
+#Note: Please update all mandatory fields. Search for <PLEASE_CHANGE>
+
+### BEGIN: MANDATORY PROPERTIES to be updated ###
+# JDBC Properties for Snowflake
+#CONNECTOR_SNOWFLAKE_JDBC_URL: "jdbc:snowflake://testsnowflake.prod.us-west-2.aws.snowflakecomputing.com"
+CONNECTOR_SNOWFLAKE_JDBC_URL: "jdbc:snowflake://vxwhhxh-xx71666.snowflakecomputing.com/"
+CONNECTOR_SNOWFLAKE_JDBC_USERNAME: "PRIVACERA_POLICYSYNC_USER"
+CONNECTOR_SNOWFLAKE_JDBC_PASSWORD: "<PLEASE_CHANGE>"
+
+# Password to be set when new user is created
+CONNECTOR_SNOWFLAKE_DEFAULT_USER_PASSWORD: "<PLEASE_CHANGE>"
+
+
+
+####################  NO NEED TO CHANGE BELOW  ####################
+
+# Manage Resources List
+CONNECTOR_SNOWFLAKE_MANAGE_DATABASE_LIST: "PRIVACERA_DB"
+
+CONNECTOR_SNOWFLAKE_OWNER_ROLE: "PRIVACERA_POLICYSYNC_ROLE"
+CONNECTOR_SNOWFLAKE_WAREHOUSE_TO_USE: "PRIVACERA_POLICYSYNC_WH"
+CONNECTOR_SNOWFLAKE_ROLE_TO_USE: "PRIVACERA_POLICYSYNC_ROLE"
+CONNECTOR_SNOWFLAKE_MANAGE_WAREHOUSE_LIST: "PRIVACERA_POLICYSYNC_WH"
+#CONNECTOR_SNOWFLAKE_MANAGE_WAREHOUSE_LIST: "SNOWFLAKE_LEARNING_WH"
+
+#only used for policysync v1
+CONNECTOR_SNOWFLAKE_JDBC_DB: "privacera_db"
+
+
+# Enable/Disable Manage User/Group/Role
+CONNECTOR_SNOWFLAKE_MANAGE_ENTITIES: "true"
+
+# Enable/Disable Perform Grant and Revokes
+CONNECTOR_SNOWFLAKE_GRANT_UPDATES: "true"
+
+### END: MANDATORY PROPERTIES to be updated ###
+
+# Enable the Audit Setup based on your snowflake account settings
+# CONNECTOR_SNOWFLAKE_ENABLE_AUDIT_SOURCE_SIMPLE: "true"
+CONNECTOR_SNOWFLAKE_AUDIT_ENABLE: "true"
+# CONNECTOR_SNOWFLAKE_ENABLE_AUDIT_SOURCE_ADVANCE: "false"
+
+# To enable PolicySync for snowflake
+CONNECTOR_SNOWFLAKE_ENABLE: "true"
+
+# Put the prefix for user/group/roles to be managed, so only user/group/roles with specified prefixes will be managed
+# Keep it commented to manage all user/group/roles present in ranger
+# For eg. CONNECTOR_SNOWFLAKE_MANAGE_ENTITY_PREFIX: "dev_*,sa_*"
+# CONNECTOR_SNOWFLAKE_MANAGE_ENTITY_PREFIX: ""
+
+# Set the prefixes for roles to be created in db
+# CONNECTOR_SNOWFLAKE_ENTITY_ROLE_PREFIX: "priv_"
+
+# Ignore User/Group/Role Lists
+# CONNECTOR_SNOWFLAKE_IGNORE_USER_LIST: "<PLEASE_CHANGE>"
+# CONNECTOR_SNOWFLAKE_IGNORE_GROUP_LIST: "<PLEASE_CHANGE>"
+# CONNECTOR_SNOWFLAKE_IGNORE_ROLE_LIST: "<PLEASE_CHANGE>"
+
+# Manage User/Group/Role Lists
+# CONNECTOR_SNOWFLAKE_MANAGE_USER_LIST: "<PLEASE_CHANGE>"
+# CONNECTOR_SNOWFLAKE_MANAGE_GROUP_LIST: "<PLEASE_CHANGE>"
+# CONNECTOR_SNOWFLAKE_MANAGE_ROLE_LIST: "<PLEASE_CHANGE>"
+
+# Filter Users by Group
+# CONNECTOR_SNOWFLAKE_MANAGE_USER_FILTERBY_GROUP: "<PLEASE_CHANGE>"
+
+# CONNECTOR_SNOWFLAKE_MANAGE_GROUPS: "<PLEASE_CHANGE>"

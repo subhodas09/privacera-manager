@@ -1,0 +1,68 @@
+# 🔒 Sensitive Configuration Files
+# These files contain sensitive information and should not be committed
+
+# User configuration files
+config.env
+*.env
+# Exception: Allow variables.env for workflow configuration
+!variables.env
+
+# Generated files with sensitive data
+generated/
+
+# Backup files
+backup/
+*.bak
+
+# Runner-specific files with sensitive data
+kubeconfig*
+*.kubeconfig
+
+# Temporary files
+*.tmp
+*.temp
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Log files
+*.log
+
+# Kubernetes secrets (if accidentally created as files)
+*secret*.yaml
+*secret*.yml
+
+# AWS and cloud credentials
+.aws/
+aws-credentials*
+credentials*
+*.pem
+*.key
+
+# Privacera-specific sensitive files
+vars.privacera-secrets.yml
+vars.encrypt.secrets.yml
+privacera-secrets*
+
+# GitHub tokens and authentication
+.github-token
+github-token*
+*token*
+set-secrets-example.sh
+
+# Ansible vault files
+vault-password*
+*.vault
+
+# SSL certificates and keys
+*.crt
+*.csr
+*.p12
+*.pfx 

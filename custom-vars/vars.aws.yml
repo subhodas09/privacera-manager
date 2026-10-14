@@ -1,0 +1,18 @@
+#This file enables privacera installation for AWS Cloud
+#Note: Please update all mandatory fields. Search for <PLEASE_CHANGE>
+
+#By Default, Privacera will be installed in "us-east-1" Region. Uncomment and update the below variable to install it in a different region.
+#AWS_REGION: "<PLEASE_CHANGE>"
+AWS_REGION: "us-east-1"
+
+###############################################
+##### BELOW VARIABLE SHOULD NOT BE CHANGED ####
+###############################################
+
+### Enables Installation for AWS Cloud
+CLOUD_SERVICE: "aws"
+K8S_PROVIDER: "aws"
+
+###############################################
+### Uncomment the below flag if you are using IMDSv2 machine in aws for PM Jump Host
+# IMDS_V2_ENABLED: "true"

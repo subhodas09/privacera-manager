@@ -1,0 +1,21 @@
+### Provide K8s Cluster Name, it can be obtained by running command "kubectl config get-contexts"  
+EKS_CLUSTER_NAME: "jason-pm-demo-aws"
+K8S_CLUSTER_NAME: "{{EKS_CLUSTER_NAME}}"
+
+
+### Below is the default label applied to privacera namespace, Uncomment and update the variable with the label as shown below.
+#K8S_NAMESPACE_LABELS:
+#- app: privacera
+
+
+#################################### ADVANCED/OPTIONAL CONFIGS ############################################
+
+### Kubernetes Namespace is set to same as your Deployment Env Name defined in config/vars.privacera.yml. If there is a need to use a different namespace update the below variable. Ex: "privacera-prod", "privacera-stage", etc.
+K8S_NAMESPACE: "{{DEPLOYMENT_ENV_NAME}}"
+
+
+###############################################
+#### BELOW VARIABLE SHOULD NOT BE CHANGED #####
+###############################################
+
+PRIVACERA_INSTALL_MODE: "kubernetes"

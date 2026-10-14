@@ -1,0 +1,9 @@
+# GitHub Actions Runner Configuration
+# Update these values with your preferred settings
+
+# GitHub Actions Runner Namespace
+GITHUB_ACTIONS_NAMESPACE: "github-actions-runner"
+
+authSecret:
+  create: true
+  github_token: YOUR_GITHUB_TOKEN_HERE 

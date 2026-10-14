@@ -1,0 +1,5 @@
+## HELM Enabling
+HELM_ENABLED: "true"
+
+## Below variable is used to enable the HELM based deployment
+HELM_DEPLOYMENT_ENABLED: "true"
