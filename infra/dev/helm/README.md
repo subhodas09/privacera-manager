@@ -123,7 +123,7 @@ jobs:
   test:
     runs-on: privacera-dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: uname -a
 ```
 
@@ -136,12 +136,18 @@ make watch-runners
 ## Security and capacity choices
 
 - Controller and runner resources are separated into different namespaces.
-- Pod Security Admission enforces `baseline` and reports `restricted` violations.
-- Containers drop Linux capabilities and cannot gain privileges.
+- Pod Security Admission enforces `baseline` for `arc-systems`. The dedicated
+  `arc-runners` namespace enforces `privileged` because ARC's DinD sidecar
+  requires it, while continuing to audit and warn against `restricted`.
+- The controller, listener, and Actions runner containers drop Linux capabilities
+  and cannot gain privileges.
 - Ordinary runner pods do not receive a Kubernetes service-account token.
 - Resource requests/limits protect the small development node.
 - `minRunners: 0` removes idle runner cost; `maxRunners: 1` matches the current `m7i-flex.large` development capacity. Reassess this after switching to `r5.2xlarge` or an approved equivalent.
-- No Docker-in-Docker mode is enabled. Docker builds and container jobs require a separately reviewed design because DinD normally introduces privileged containers.
+- Privacera Manager invokes Docker for its tooling container, so this scale set
+  uses ARC's official Docker-in-Docker mode. Its isolated `docker:dind` sidecar
+  is privileged. Keep this scale set repository-scoped and allow only trusted
+  deployment workflows to use it.
 - Private nodes use NAT for outbound HTTPS to GitHub and GHCR; no inbound load balancer is required.
 - Self-hosted runners should not execute untrusted fork pull requests with sensitive credentials. Restrict allowed repositories/workflows, protect deployment environments, and pin third-party actions to commit SHAs.
 

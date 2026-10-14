@@ -59,7 +59,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -116,51 +116,22 @@ jobs:
           
           echo "✅ All required configuration is set"
 
-      - name: Set up kubeconfig
-        run: |
-          echo "Setting up kubeconfig..."
-          # First try to use existing kubeconfig if available
-          if [ -f "$HOME/.kube/config" ]; then
-            echo "Using existing kubeconfig from $HOME/.kube/config"
-            export KUBECONFIG=$HOME/.kube/config
-          elif [ -f "${GITHUB_WORKSPACE}/kubeconfig" ]; then
-            echo "Using kubeconfig from repository"
-            export KUBECONFIG=${GITHUB_WORKSPACE}/kubeconfig
-          elif [ -n "${{ secrets.KUBECONFIG_B64 }}" ]; then
-            echo "Using kubeconfig from secret..."
-            echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > kubeconfig
-            export KUBECONFIG=$PWD/kubeconfig
-          else
-            echo "No kubeconfig found, will check if kubectl is already configured"
-          fi
-
       - name: Install kubectl
         run: |
           echo "Installing kubectl..."
-          KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
-          echo "Latest stable kubectl version: ${KUBECTL_VERSION}"
-          curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/
-          echo "kubectl installed successfully"
-          kubectl version --client
-
-      - name: Check current kubectl context
-        run: |
-          echo "Checking kubectl configuration..."
-          # Try different kubeconfig locations
-          if [ -f "$HOME/.kube/config" ]; then
-            export KUBECONFIG=$HOME/.kube/config
-          elif [ -f "${GITHUB_WORKSPACE}/kubeconfig" ]; then
-            export KUBECONFIG=${GITHUB_WORKSPACE}/kubeconfig
-          elif [ -f "$PWD/kubeconfig" ]; then
-            export KUBECONFIG=$PWD/kubeconfig
-          fi
-          
-          echo "Current kubectl context:"
-          kubectl config current-context || echo "No context found, will try default"
+          mkdir -p "${RUNNER_TEMP}/bin"
+          KUBECTL_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable-1.32.txt)
+          echo "Installing Kubernetes-compatible kubectl ${KUBECTL_VERSION}"
+          curl -fsSLo "${RUNNER_TEMP}/bin/kubectl" \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod 0755 "${RUNNER_TEMP}/bin/kubectl"
+          echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/bin/kubectl" version --client
 
       - name: Validate required secrets
+        env:
+          AWS_ACCESS_KEY_ID_TO_VALIDATE: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY_TO_VALIDATE: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           echo "Validating required secrets..."
           MISSING_SECRETS=""
@@ -185,6 +156,12 @@ jobs:
           fi
           if [ -z "$SNOWFLAKE_DEFAULT_USER_PASSWORD" ]; then
             MISSING_SECRETS="${MISSING_SECRETS} SNOWFLAKE_DEFAULT_USER_PASSWORD"
+          fi
+          if [ -z "$AWS_ACCESS_KEY_ID_TO_VALIDATE" ]; then
+            MISSING_SECRETS="${MISSING_SECRETS} AWS_ACCESS_KEY_ID"
+          fi
+          if [ -z "$AWS_SECRET_ACCESS_KEY_TO_VALIDATE" ]; then
+            MISSING_SECRETS="${MISSING_SECRETS} AWS_SECRET_ACCESS_KEY"
           fi
           
           if [ -n "${MISSING_SECRETS}" ]; then
@@ -227,7 +204,7 @@ jobs:
 
 
       - name: Login to Privacera Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.PRIVACERA_HUB_SERVER }}
           username: ${{ secrets.PRIVACERA_HUB_USER }}
@@ -238,28 +215,36 @@ jobs:
           echo "Installing Helm..."
           curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
           chmod 700 get_helm.sh
-          ./get_helm.sh
+          HELM_INSTALL_DIR="${RUNNER_TEMP}/bin" USE_SUDO=false ./get_helm.sh
           helm version
 
       - name: Install additional dependencies
         run: |
-          echo "Installing additional dependencies..."
-          sudo apt-get update
-          sudo apt-get install -y curl tar gzip wget openssl hostname sudo unzip python3 python3-pip
-          
-          # Install AWS CLI for self-hosted runners
+          echo "Validating tools already provided by the runner image..."
+          for command in curl tar gzip openssl hostname unzip python3 docker; do
+            command -v "${command}" >/dev/null || {
+              echo "ERROR: required command is missing: ${command}"
+              exit 1
+            }
+          done
+
+          echo "Installing the curl-backed wget compatibility wrapper..."
+          cp "${GITHUB_WORKSPACE}/scripts/wget" "${RUNNER_TEMP}/bin/wget"
+          chmod 0755 "${RUNNER_TEMP}/bin/wget"
+
           echo "Installing AWS CLI..."
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip
-          sudo ./aws/install
+          curl -fsSLo "${RUNNER_TEMP}/awscliv2.zip" \
+            "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+          unzip -q "${RUNNER_TEMP}/awscliv2.zip" -d "${RUNNER_TEMP}"
+          "${RUNNER_TEMP}/aws/install" \
+            --install-dir "${RUNNER_TEMP}/aws-cli" \
+            --bin-dir "${RUNNER_TEMP}/bin"
           aws --version
-          
-          # Install Ansible
-          pip3 install ansible-core>=2.12.0
-          ansible --version
+          wget --version
+          docker info --format 'Docker server {{.ServerVersion}} is ready'
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -292,13 +277,26 @@ jobs:
       - name: Download installation scripts
         run: |
           echo "Downloading installation scripts..."
-          curl -s https://raw.githubusercontent.com/privacera/privacera-installation-scripts/refs/heads/main/base-install/install_pm.sh -o install_pm.sh
-          curl -s https://raw.githubusercontent.com/privacera/privacera-installation-scripts/refs/heads/main/base-install/bootstrap_privacera.sh -o bootstrap_privacera.sh
+          curl -fsSLo install_pm.sh https://raw.githubusercontent.com/privacera/privacera-installation-scripts/refs/heads/main/base-install/install_pm.sh
+          curl -fsSLo bootstrap_privacera.sh https://raw.githubusercontent.com/privacera/privacera-installation-scripts/refs/heads/main/base-install/bootstrap_privacera.sh
           
           # Download AWS-specific scripts
           echo "Downloading AWS-specific scripts..."
-          curl -s https://raw.githubusercontent.com/privacera/privacera-installation-scripts/refs/heads/main/base-install/self-managed/aws/aws_pm_config_env.sh -o aws_pm_config_env.sh
-          
+          curl -fsSLo aws_pm_config_env.sh https://raw.githubusercontent.com/privacera/privacera-installation-scripts/refs/heads/main/base-install/self-managed/aws/aws_pm_config_env.sh
+
+          # docker/login-action already authenticated this runner. Removing the
+          # duplicate command prevents the password from appearing in argv.
+          sed -i '/^docker login /d' install_pm.sh
+
+          # The encrypted file is already owned by the non-root runner user.
+          # Privacera's upstream sudo chown is unnecessary in this container.
+          sed -i '/^[[:space:]]*sudo chown .*ENCRYPTED_FILE/d' bootstrap_privacera.sh
+
+          if grep -Eq '^[[:space:]]*sudo ' install_pm.sh bootstrap_privacera.sh; then
+            echo "ERROR: an unsupported sudo command remains in the downloaded scripts"
+            exit 1
+          fi
+
           chmod a+x *.sh
 
       - name: Configure environment variables
@@ -331,9 +329,7 @@ jobs:
       - name: Run installation script
         run: |
           echo "Setting up Privacera Manager..."
-          # Create workspace directory and set HOME
-          export HOME="${GITHUB_WORKSPACE}"
-          cd "${HOME}"
+          cd "${GITHUB_WORKSPACE}"
 
           # Use AWS config file
           CONFIG_FILE="aws_pm_config_env.sh"
@@ -532,7 +528,7 @@ jobs:
           echo "✅ AWS deployment completed successfully"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: privacera-install-artifacts
           path: |

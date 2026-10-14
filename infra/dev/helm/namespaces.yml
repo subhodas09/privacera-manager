@@ -17,7 +17,10 @@ metadata:
   name: arc-runners
   labels:
     app.kubernetes.io/part-of: actions-runner-controller
-    pod-security.kubernetes.io/enforce: baseline
+    # ARC's official Docker-in-Docker mode requires a privileged daemon
+    # sidecar. This exception is confined to the repository-scoped runner
+    # namespace; restricted violations remain visible through audit/warnings.
+    pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/enforce-version: latest
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/audit-version: latest

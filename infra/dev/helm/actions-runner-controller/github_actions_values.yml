@@ -12,6 +12,12 @@ minRunners: 0
 maxRunners: 1
 runnerScaleSetName: privacera-dev
 
+# Privacera Manager invokes Docker to run its tooling container. ARC's official
+# dind mode supplies an isolated daemon for each ephemeral runner. The daemon
+# sidecar is privileged; keep this scale set dedicated to this trusted repo.
+containerMode:
+  type: dind
+
 controllerServiceAccount:
   name: arc-controller
   namespace: arc-systems
@@ -43,10 +49,6 @@ template:
   spec:
     # Standard runner jobs do not need Kubernetes API credentials.
     automountServiceAccountToken: false
-    securityContext:
-      runAsNonRoot: true
-      seccompProfile:
-        type: RuntimeDefault
     containers:
       - name: runner
         image: ghcr.io/actions/actions-runner:latest

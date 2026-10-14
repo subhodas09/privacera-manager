@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Minimal wget compatibility for the Privacera bootstrap scripts. The upstream
+# scripts only use: wget URL -O OUTPUT.
+output=""
+url=""
+
+while (($#)); do
+  case "$1" in
+    -O)
+      [[ $# -ge 2 ]] || { echo "wget wrapper: -O requires a path" >&2; exit 2; }
+      output="$2"
+      shift 2
+      ;;
+    --version)
+      echo "wget compatibility wrapper backed by curl"
+      exit 0
+      ;;
+    --)
+      shift
+      ;;
+    -*)
+      echo "wget wrapper: unsupported option: $1" >&2
+      exit 2
+      ;;
+    *)
+      [[ -z "$url" ]] || { echo "wget wrapper: multiple URLs are unsupported" >&2; exit 2; }
+      url="$1"
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$url" ]] || { echo "wget wrapper: URL is required" >&2; exit 2; }
+[[ -n "$output" ]] || output="$(basename "${url%%\?*}")"
+
+exec curl --fail --location --silent --show-error --retry 3 \
+  --output "$output" "$url"
