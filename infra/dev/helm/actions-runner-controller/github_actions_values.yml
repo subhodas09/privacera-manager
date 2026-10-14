@@ -1,0 +1,69 @@
+# Non-secret values for GitHub's official gha-runner-scale-set chart.
+# Repository URL that owns this runner scale set. Change this to
+# https://github.com/subhodas09 for an organization/account-wide scale set.
+githubConfigUrl: https://github.com/subhodas09/privacera-manager
+
+# This Secret must exist in arc-runners. Never put the PAT directly here.
+githubConfigSecret: arc-github-auth
+
+# Scale to zero when idle. The current dev node is smaller than r5.2xlarge, so
+# one concurrent runner is the safe initial ceiling.
+minRunners: 0
+maxRunners: 1
+runnerScaleSetName: privacera-dev
+
+controllerServiceAccount:
+  name: arc-controller
+  namespace: arc-systems
+
+listenerTemplate:
+  spec:
+    securityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containers:
+      - name: listener
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+
+template:
+  spec:
+    # Standard runner jobs do not need Kubernetes API credentials.
+    automountServiceAccountToken: false
+    securityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command:
+          - /home/runner/run.sh
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 1001
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi

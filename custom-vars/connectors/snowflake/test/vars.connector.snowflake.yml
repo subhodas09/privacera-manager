@@ -5,7 +5,7 @@
 ### BEGIN: MANDATORY PROPERTIES to be updated ###
 # JDBC Properties for Snowflake
 #CONNECTOR_SNOWFLAKE_JDBC_URL: "jdbc:snowflake://testsnowflake.prod.us-west-2.aws.snowflakecomputing.com"
-CONNECTOR_SNOWFLAKE_JDBC_URL: "jdbc:snowflake://vxwhhxh-xx71666.snowflakecomputing.com/"
+CONNECTOR_SNOWFLAKE_JDBC_URL: "jdbc:snowflake://vxwhhxh-xx71666.snowflakecomputing.com"
 CONNECTOR_SNOWFLAKE_JDBC_USERNAME: "PRIVACERA_POLICYSYNC_USER"
 CONNECTOR_SNOWFLAKE_JDBC_PASSWORD: "<PLEASE_CHANGE>"
 

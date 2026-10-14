@@ -21,6 +21,7 @@ kubeconfig*
 # Temporary files
 *.tmp
 *.temp
+**/.rendered/
 
 # OS-specific files
 .DS_Store
@@ -50,6 +51,7 @@ credentials*
 vars.privacera-secrets.yml
 vars.encrypt.secrets.yml
 privacera-secrets*
+**/snowflake-user-password.sql
 
 # GitHub tokens and authentication
 .github-token
@@ -65,4 +67,14 @@ vault-password*
 *.crt
 *.csr
 *.p12
-*.pfx 
+*.pfx
+
+# Terraform local and environment-specific files
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/terraform.tfvars
+**/backend.hcl
+**/crash.log
+**/crash.*.log

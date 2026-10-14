@@ -1,0 +1,13 @@
+bucket       = "REPLACE_ME-terraform-state"
+region       = "ap-southeast-2"
+profile      = "privacera"
+use_lockfile = true
+
+# This development backend uses S3-managed encryption (SSE-S3). To use a
+# customer-managed KMS key later, uncomment and set its ARN:
+# kms_key_id = "arn:aws:kms:ap-southeast-2:111122223333:key/REPLACE_ME"
+
+# Optional for a dedicated Terraform deployment role:
+# assume_role = {
+#   role_arn = "arn:aws:iam::111122223333:role/terraform-deploy"
+# }

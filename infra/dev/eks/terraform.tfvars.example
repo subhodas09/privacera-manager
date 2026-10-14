@@ -1,0 +1,38 @@
+aws_region          = "ap-southeast-2"
+aws_profile         = "privacera"
+allowed_account_ids = ["111122223333"]
+project_name        = "privacera"
+environment         = "dev"
+cluster_name        = "privacera-cluster"
+kubernetes_version  = "1.32"
+
+vpc_state_bucket     = "REPLACE_ME-terraform-state"
+vpc_state_key        = "privacera/dev/vpc/terraform.tfstate"
+vpc_state_region     = "ap-southeast-2"
+vpc_state_kms_key_id = null
+
+# Prefer SSO-created roles or dedicated platform roles. A named IAM user is
+# supported for constrained exercises where federation is unavailable, but its
+# long-lived credentials should be rotated and replaced with a role later.
+cluster_admin_principal_arns = [
+  "arn:aws:iam::111122223333:role/AWSReservedSSO_PlatformAdmin_REPLACE_ME",
+  # "arn:aws:iam::111122223333:user/privacera-terraform-operator",
+]
+
+# Private-only is the default. If temporary public access is unavoidable, set
+# this true and supply only trusted office/VPN egress CIDRs; 0.0.0.0/0 is rejected.
+endpoint_public_access       = false
+endpoint_public_access_cidrs = []
+
+node_instance_types = ["r5.2xlarge"]
+node_min_size       = 0
+node_desired_size   = 1
+node_max_size       = 3
+node_disk_size_gib  = 100
+
+control_plane_log_retention_days = 90
+
+additional_tags = {
+  CostCenter = "development"
+  Owner      = "platform-team"
+}

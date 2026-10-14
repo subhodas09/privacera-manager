@@ -4,6 +4,10 @@
 
 This guide provides complete step-by-step instructions for deploying Privacera Self-Managed application with a Snowflake connector using the **`main`** branch.
 
+## Infrastructure as code
+
+The hardened development AWS foundation is available in [`infra/dev`](./infra/dev). It provides separate Terraform state boundaries for a three-tier VPC and EKS; deploy the VPC first, then EKS. See [`infra/README.md`](./infra/README.md) for the deployment order and security baseline.
+
 ## 🚀 Step-by-Step Setup Guide
 
 ### Step 1: Register for Snowflake Trial Account
@@ -271,7 +275,7 @@ kubectl logs -n $GITHUB_ACTIONS_NAMESPACE -l app=runner
    - Create a new workflow or use an existing one
    - Add the following to your workflow:
    ```yaml
-   runs-on: [self-hosted, k8s, linux]
+   runs-on: privacera-dev
    ```
    - Run the workflow and verify it executes on your self-hosted runner
 
@@ -287,7 +291,7 @@ kubectl logs -n $GITHUB_ACTIONS_NAMESPACE -l app=runner
 #### **5.1 Configure Snowflake Connector**
 
 ##### **5.1.1 Snowflake Prerequisites Setup**
-Follow the [Snowflake Prerequisites Guide](https://docs.privacera.com/connectors/snowflake/access/prerequisites.html) to set up:
+Follow the [Snowflake Prerequisites Guide](https://docs.privacera.com/connectors/snowflake/access/prerequisites.html). This repository includes a non-destructive, repeatable worksheet at [`custom-vars/connectors/snowflake/test/snowflake-prerequisites.sql`](custom-vars/connectors/snowflake/test/snowflake-prerequisites.sql) and detailed instructions in the connector [`README`](custom-vars/connectors/snowflake/test/README.md).
 
 1. **Create Snowflake Role**: `PRIVACERA_POLICYSYNC_ROLE`
 2. **Create Snowflake Warehouse**: `PRIVACERA_POLICYSYNC_WH`
@@ -303,17 +307,16 @@ Follow the [Snowflake Prerequisites Guide](https://docs.privacera.com/connectors
 > ```sql
 > GRANT APPLY ROW ACCESS POLICY ON ACCOUNT TO ROLE "PRIVACERA_POLICYSYNC_ROLE";
 > ```
-> **You can safely ignore this error for our use cases** - it's a limitation of the free trial account and doesn't affect the core functionality needed for Privacera integration.
+> Continue with the remaining development setup, but note that Privacera-managed row access policies will not be available until the Snowflake account edition supports that grant.
 >
 > **⚠️ Warehouse Creation Note**: When creating the `PRIVACERA_POLICYSYNC_WH` warehouse, **remove** the `SCALING_POLICY = 'ECONOMY'` line from the warehouse creation command. The correct command should be:
 > ```sql
 > CREATE WAREHOUSE IF NOT EXISTS "PRIVACERA_POLICYSYNC_WH"
-> WITH
->     WAREHOUSE_SIZE = 'XSMALL',
->     WAREHOUSE_TYPE = 'STANDARD',
->     AUTO_SUSPEND = 600,
->     AUTO_RESUME = TRUE,
->     MIN_CLUSTER_COUNT = 1,
+>     WAREHOUSE_SIZE = 'XSMALL'
+>     WAREHOUSE_TYPE = 'STANDARD'
+>     AUTO_SUSPEND = 600
+>     AUTO_RESUME = TRUE
+>     MIN_CLUSTER_COUNT = 1
 >     MAX_CLUSTER_COUNT = 1;
 > ```
 
@@ -327,8 +330,8 @@ nano custom-vars/connectors/snowflake/test/vars.connector.snowflake.yml
 # Update the following configuration values:
 # CONNECTOR_SNOWFLAKE_JDBC_URL: "jdbc:snowflake://your-account.snowflakecomputing.com"
 # CONNECTOR_SNOWFLAKE_JDBC_USERNAME: "PRIVACERA_POLICYSYNC_USER"
-# CONNECTOR_SNOWFLAKE_JDBC_PASSWORD: "Snowflake2024!@#"
-# CONNECTOR_SNOWFLAKE_DEFAULT_USER_PASSWORD: "Snowflake2024!@#"
+# Keep both password fields as <PLEASE_CHANGE>. The GitHub Actions workflow
+# injects SNOWFLAKE_JDBC_PASSWORD and SNOWFLAKE_DEFAULT_USER_PASSWORD at runtime.
 ```
 
 
@@ -343,7 +346,7 @@ nano custom-vars/connectors/snowflake/test/vars.connector.snowflake.yml
 #### **6.1 Add Secrets to GitHub**
 1. Go to: **GitHub Repository** → **Settings** → **Secrets and variables** → **Actions**
 2. Click **"New repository secret"**
-3. Add each of the 5 required secrets:
+3. Add each required secret:
 
 | Secret Name | Secret Type | Description |
 |-------------|-------------|-------------|
@@ -352,6 +355,10 @@ nano custom-vars/connectors/snowflake/test/vars.connector.snowflake.yml
 | `ANSIBLE_VAULT_PASSWORD` | Security Passwords | Strong password for Ansible vault (min 12 chars) |
 | `GLOBAL_DEFAULT_SECRETS_KEYSTORE_PASSWORD` | Security Passwords | Strong password for keystore (min 12 chars) |
 | `EKS_CLUSTER_NAME` | Infrastructure | Your EKS cluster name |
+| `SNOWFLAKE_JDBC_PASSWORD` | Snowflake | Password for `PRIVACERA_POLICYSYNC_USER` |
+| `SNOWFLAKE_DEFAULT_USER_PASSWORD` | Snowflake | Separate default password for users created by PolicySync |
+| `AWS_ACCESS_KEY_ID` | AWS | Access key for the temporary deployment IAM user |
+| `AWS_SECRET_ACCESS_KEY` | AWS | Secret key for the temporary deployment IAM user |
 
 
 
@@ -368,7 +375,7 @@ nano custom-vars/connectors/snowflake/test/vars.connector.snowflake.yml
 3. Select the branch: **`main`** (or your default branch)
 4. Configure parameters:
    - **Deployment Type**: AWS (default)
-   - **AWS Region**: us-east-1 (default)
+   - **AWS Region**: ap-southeast-2 (default)
    - **Skip Helm Validation**: false (default)
    - **Debug Mode**: false (recommended: true for first run)
 5. Click **"Run workflow"**
