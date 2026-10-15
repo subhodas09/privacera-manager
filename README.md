@@ -933,9 +933,10 @@ new chart contained `gp3`. Kubernetes rejected Helm's three-way patch with
 `updates to parameters are forbidden`, but the vendor wrapper ignored the
 individual Helm errors. The workflow now runs
 [`scripts/repair_failed_storageclass_releases.py`](scripts/repair_failed_storageclass_releases.py).
-It recognizes only this exact error and performs a one-time `helm upgrade
---force` for the seven affected releases so their stored manifests match the
-new classes. Any other failed release stops the workflow.
+It recognizes only this exact error, deletes only the named StorageClass
+object, and reruns the affected chart so Helm recreates the class and stores
+the new manifest. PVCs, PVs, and EBS volumes are not deleted. Any other failed
+release stops the workflow.
 
 > **Destructive limitation:** a PV with reclaim policy `Delete` is permanently
 > deleted with its claim. Never repeat this migration on valuable data without

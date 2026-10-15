@@ -3,14 +3,16 @@
 
 The original Privacera releases stored gp2/in-tree StorageClass manifests in
 Helm history. Kubernetes rejects an ordinary upgrade to the EBS CSI/gp3
-manifests because StorageClass parameters are immutable. Only releases failed
-for that exact reason are retried with Helm's replacement strategy.
+manifests because StorageClass parameters are immutable. For only that exact
+failure, the StorageClass object is deleted and the affected chart recreates
+it. PVCs, PVs, and EBS volumes are not deleted.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -59,6 +61,13 @@ def is_storageclass_immutability_error(description: str) -> bool:
     )
 
 
+def storageclass_name(description: str) -> str:
+    match = re.search(r'cannot patch "([^"]+)" with kind StorageClass', description)
+    if match is None:
+        raise ValueError(f"StorageClass name was not found in: {description}")
+    return match.group(1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("charts_dir", type=Path)
@@ -82,9 +91,17 @@ def main() -> int:
         if not (chart / "Chart.yaml").is_file():
             raise SystemExit(f"Generated chart not found for {release}: {chart}")
 
-        print(f"Repairing {release} after immutable StorageClass migration")
+        storage_class = storageclass_name(description)
+        print(
+            f"Repairing {release} after immutable StorageClass migration; "
+            f"recreating {storage_class}"
+        )
         run(
-            "helm", "upgrade", "--install", "--force", release, str(chart),
+            "kubectl", "delete", "storageclass", storage_class,
+            "--ignore-not-found=true",
+        )
+        run(
+            "helm", "upgrade", "--install", release, str(chart),
             "--namespace", args.namespace,
         )
 
