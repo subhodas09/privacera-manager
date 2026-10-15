@@ -1,1 +1,9 @@
 MONITORING_ENABLE: "true"
+
+# Keep Grafana and the monitoring services enabled, but disable the dashboard
+# post-install Job/CronJob. Its vendor image clones Privacera's private GitLab
+# dashboard repository over SSH, and this environment has no key authorized for
+# that repository. Dashboards can be imported separately from Privacera's public
+# S3 archive if they are required.
+GRAFANA_UPLOAD_COMMON_DASHBOARDS: "false"
+POST_INSTALL_JOB_ENABLED: "false"

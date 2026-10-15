@@ -1,0 +1,11 @@
+# Development sizing overrides for Privacera Manager 9.0.29.1.
+#
+# The Solr exporter is an optional monitoring workload. Its default request of
+# one full CPU cannot fit on the three m7i-flex.large development nodes after
+# the core Privacera services are scheduled. Keep the default 1 GiB memory
+# allocation for the Java process, but reduce its CPU reservation and limit.
+#
+# These are the variable names supported by the currently pinned Privacera
+# release. Re-check the sizing variable names before upgrading Privacera.
+SOLR_EXPORTER_CPU_MIN: "0.25"
+SOLR_EXPORTER_CPU_MAX: "0.5"

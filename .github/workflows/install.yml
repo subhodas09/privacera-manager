@@ -467,6 +467,22 @@ jobs:
             echo "⚠️ Helm charts directory not found, skipping API version fixes"
           fi
 
+      - name: Patch generated Privacera charts
+        env:
+          PRIVACERA_CHARTS_DIR: ${{ github.workspace }}/privacera-manager/output/kubernetes/helm
+        run: |
+          echo "Patching generated Privacera StorageClasses for EBS CSI..."
+          python3 "${GITHUB_WORKSPACE}/scripts/patch_privacera_storage_classes.py" \
+            "${PRIVACERA_CHARTS_DIR}"
+          python3 "${GITHUB_WORKSPACE}/scripts/patch_privacera_storage_classes.py" \
+            "${GITHUB_WORKSPACE}/helm-charts-output"
+
+          echo "Patching the generated Solr exporter URL for in-cluster HTTP..."
+          python3 "${GITHUB_WORKSPACE}/scripts/patch_privacera_solr_exporter.py" \
+            "${PRIVACERA_CHARTS_DIR}"
+          python3 "${GITHUB_WORKSPACE}/scripts/patch_privacera_solr_exporter.py" \
+            "${GITHUB_WORKSPACE}/helm-charts-output"
+
       - name: Deploy to Kubernetes
         run: |
           echo "Running upgrade..."

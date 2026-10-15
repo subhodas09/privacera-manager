@@ -5,7 +5,7 @@
 ### BEGIN: MANDATORY PROPERTIES to be updated ###
 # JDBC Properties for Snowflake
 #CONNECTOR_SNOWFLAKE_JDBC_URL: "jdbc:snowflake://testsnowflake.prod.us-west-2.aws.snowflakecomputing.com"
-CONNECTOR_SNOWFLAKE_JDBC_URL: "jdbc:snowflake://vxwhhxh-xx71666.snowflakecomputing.com"
+CONNECTOR_SNOWFLAKE_JDBC_URL: "jdbc:snowflake://kbgsygr-cs63822.snowflakecomputing.com"
 CONNECTOR_SNOWFLAKE_JDBC_USERNAME: "PRIVACERA_POLICYSYNC_USER"
 CONNECTOR_SNOWFLAKE_JDBC_PASSWORD: "<PLEASE_CHANGE>"
 
@@ -31,6 +31,11 @@ CONNECTOR_SNOWFLAKE_JDBC_DB: "privacera_db"
 
 # Enable/Disable Manage User/Group/Role
 CONNECTOR_SNOWFLAKE_MANAGE_ENTITIES: "true"
+CONNECTOR_SNOWFLAKE_MANAGE_USERS: "true"
+CONNECTOR_SNOWFLAKE_MANAGE_GROUPS: "true"
+CONNECTOR_SNOWFLAKE_MANAGE_ROLES: "true"
+CONNECTOR_SNOWFLAKE_CREATE_USER: "true"
+CONNECTOR_SNOWFLAKE_CREATE_USER_ROLE: "true"
 
 # Enable/Disable Perform Grant and Revokes
 CONNECTOR_SNOWFLAKE_GRANT_UPDATES: "true"

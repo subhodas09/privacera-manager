@@ -10,10 +10,14 @@ The checked-in Makefile turns the installation into a repeatable repository oper
 infra/dev/helm/
 ├── Makefile
 ├── namespaces.yml
-└── actions-runner-controller/
+├── actions-runner-controller/
     ├── github_actions_controller_values.yml
     ├── github_actions_values.yml
     └── github_actions_secret.yml.example
+└── privacera-storage/
+    ├── storageclasses.yml
+    ├── pvcs.yml
+    └── README.md
 ```
 
 - `namespaces.yml` defines separate controller and runner namespaces with Pod Security Admission labels.
@@ -21,6 +25,8 @@ infra/dev/helm/
 - `github_actions_values.yml` configures the runner scale set and is the file to edit for the GitHub repository/organization URL.
 - `github_actions_secret.yml.example` is a safe template. Its real copy is ignored and must never be committed.
 - `Makefile` pins the chart version and contains the full Helm commands.
+- `privacera-storage` documents and captures the EBS CSI storage definitions
+  needed by the generated Privacera 7.0.0 charts on multi-AZ EKS.
 
 ## Current official charts
 
@@ -102,6 +108,20 @@ make render
 ```
 
 Rendered output is written to `.rendered/`, which is ignored by Git.
+
+## Privacera EBS storage
+
+The Privacera installation workflow patches generated vendor StorageClass
+templates before Helm deploys them. It replaces the removed in-tree AWS EBS
+provisioner with `ebs.csi.aws.com`, uses encrypted `gp3` volumes, and enables
+`WaitForFirstConsumer` so the scheduler selects a node and Availability Zone
+before EBS creates the volume.
+
+The live dev definitions and migration notes are in
+[`privacera-storage/README.md`](privacera-storage/README.md). Recreating an
+existing claim with a `Delete` reclaim policy permanently deletes its current
+volume data; treat that procedure as a development-only migration unless a
+backup and restore plan exists.
 
 ## Verify
 

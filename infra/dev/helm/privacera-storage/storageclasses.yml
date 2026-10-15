@@ -1,0 +1,118 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: candidate-test-store-connector-snowflake-test
+  annotations:
+    meta.helm.sh/release-name: snowflake-test
+    meta.helm.sh/release-namespace: candidate-test
+  labels:
+    app.kubernetes.io/managed-by: Helm
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: candidate-test-store-diagnostics-server
+  annotations:
+    meta.helm.sh/release-name: privacera-diagnostics
+    meta.helm.sh/release-namespace: candidate-test
+  labels:
+    app.kubernetes.io/managed-by: Helm
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: candidate-test-store-privacera-auditserver
+  annotations:
+    meta.helm.sh/release-name: auditserver
+    meta.helm.sh/release-namespace: candidate-test
+  labels:
+    app.kubernetes.io/managed-by: Helm
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: candidate-test-store-privacera-grafana
+  annotations:
+    meta.helm.sh/release-name: monitoring
+    meta.helm.sh/release-namespace: candidate-test
+  labels:
+    app.kubernetes.io/managed-by: Helm
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: candidate-test-store-privacera-mariadb
+  annotations:
+    meta.helm.sh/release-name: mariadb
+    meta.helm.sh/release-namespace: candidate-test
+  labels:
+    app.kubernetes.io/managed-by: Helm
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: candidate-test-store-privacera-solr
+  annotations:
+    meta.helm.sh/release-name: solr
+    meta.helm.sh/release-namespace: candidate-test
+  labels:
+    app.kubernetes.io/managed-by: Helm
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: candidate-test-store-privacera-zookeeper
+  annotations:
+    meta.helm.sh/release-name: zookeeper
+    meta.helm.sh/release-namespace: candidate-test
+  labels:
+    app.kubernetes.io/managed-by: Helm
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
