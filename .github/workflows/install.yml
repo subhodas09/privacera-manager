@@ -503,6 +503,13 @@ jobs:
           #./privacera-manager.sh setup && 
           chmod +x ./pm_with_helm.sh  # Ensure script is executable
           ./pm_with_helm.sh upgrade
+
+          # Privacera's wrapper does not propagate individual Helm failures.
+          # Repair only the known one-time gp2/in-tree -> gp3/EBS CSI migration
+          # failure, then fail the workflow for any other failed release.
+          python3 "${GITHUB_WORKSPACE}/scripts/repair_failed_storageclass_releases.py" \
+            "${GITHUB_WORKSPACE}/privacera-manager/output/kubernetes/helm" \
+            "${DEPLOYMENT_ENV_NAME}"
           
           # Check if ALB ingress is configured and handle ALB URL update
           if [ -f "${HOME}/privacera/privacera-manager/config/custom-vars/vars.aws.alb.ingress.yml" ]; then

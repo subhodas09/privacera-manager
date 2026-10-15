@@ -5,7 +5,10 @@
 # the core Privacera services are scheduled. Keep the default 1 GiB memory
 # allocation for the Java process, but reduce its CPU reservation and limit.
 #
-# These are the variable names supported by the currently pinned Privacera
-# release. Re-check the sizing variable names before upgrading Privacera.
+# Keep both variable generations because Privacera releases changed the naming
+# convention from *_CPU_MIN/MAX to *_K8S_CPU_REQUESTS/LIMITS. The generated
+# 9.0.29.1 chart in this environment consumes the newer K8S names.
 SOLR_EXPORTER_CPU_MIN: "0.25"
 SOLR_EXPORTER_CPU_MAX: "0.5"
+SOLR_EXPORTER_K8S_CPU_REQUESTS: "0.25"
+SOLR_EXPORTER_K8S_CPU_LIMITS: "0.5"

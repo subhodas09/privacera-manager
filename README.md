@@ -887,11 +887,16 @@ remain unavailable until the Snowflake account edition supports them.
 ### 14.9 A successful workflow did not guarantee healthy pods
 
 Helm can successfully create releases while Kubernetes pods remain Pending,
-and a post-install Job can fail after the main releases are present.
+and a post-install Job can fail after the main releases are present. The vendor
+`pm_with_helm.sh` wrapper also continued after individual `helm upgrade`
+commands failed, so GitHub could show green while `helm list --failed` contained
+releases.
 
-**Resolution:** treat the commands in the end-to-end validation section as a
-required completion gate. Check pods, events, PVCs, Helm releases, and logs;
-do not use the GitHub job color as the only success signal.
+**Resolution:** the workflow now checks Helm release state after the vendor
+wrapper. It repairs only the explicitly recognized immutable StorageClass
+migration described below and fails for every unexpected failed release. Still
+treat the commands in the end-to-end validation section as a required
+completion gate; do not use the GitHub job color as the only success signal.
 
 ### 14.10 Stateful pods and volumes were stuck in one AZ
 
@@ -921,6 +926,16 @@ disposable no-data environment, we scaled stateful workloads down, deleted the
 seven old PVC/PVs and classes, applied the corrected resources, and scaled the
 workloads up. The recreated 35 GiB of encrypted gp3 storage spread across the
 three AZs.
+
+The first later Helm upgrade exposed a Helm-history edge case: revision 1 still
+contained the legacy `gp2` StorageClass definitions, while the live classes and
+new chart contained `gp3`. Kubernetes rejected Helm's three-way patch with
+`updates to parameters are forbidden`, but the vendor wrapper ignored the
+individual Helm errors. The workflow now runs
+[`scripts/repair_failed_storageclass_releases.py`](scripts/repair_failed_storageclass_releases.py).
+It recognizes only this exact error and performs a one-time `helm upgrade
+--force` for the seven affected releases so their stored manifests match the
+new classes. Any other failed release stops the workflow.
 
 > **Destructive limitation:** a PV with reclaim policy `Delete` is permanently
 > deleted with its claim. Never repeat this migration on valuable data without
@@ -960,10 +975,14 @@ entered `CrashLoopBackOff` with exit code 1.
    keystore.
 
 **Resolution:** [`custom-vars/vars.sizing.yml`](custom-vars/vars.sizing.yml)
-sets the exporter CPU request to `0.25` and limit to `0.5`. Its 1 GiB memory
-request and limit remain unchanged to avoid creating a Java out-of-memory
-risk. This is sufficient for the pod to fit on the existing third node, so no
-fourth node or cluster autoscaler is required for this development setup.
+sets the exporter CPU request to `0.25` and limit to `0.5`. It includes both
+the legacy `SOLR_EXPORTER_CPU_MIN/MAX` names and the current
+`SOLR_EXPORTER_K8S_CPU_REQUESTS/LIMITS` names because the generated 9.0.29.1
+chart consumed the latter even though older documentation used the former. Its
+1 GiB memory request and limit remain unchanged to avoid creating a Java
+out-of-memory risk. This is sufficient for the pod to fit on the existing
+third node, so no fourth node or cluster autoscaler is required for this
+development setup.
 
 The workflow also runs
 [`scripts/patch_privacera_solr_exporter.py`](scripts/patch_privacera_solr_exporter.py)
