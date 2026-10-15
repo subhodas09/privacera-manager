@@ -1067,6 +1067,118 @@ Grafana administrator password. The generated Grafana post-install CronJob was
 removed because its pod specification stored that password as a plain
 environment value; the repository configuration now prevents its recreation.
 
+### 14.14 Privacera users and groups were not synchronized to Snowflake
+
+**Symptoms:** users and groups created in the Privacera portal did not initially
+appear in Snowflake. Creating the objects in Privacera only updates Privacera's
+identity store; the Snowflake connector must be connected to the correct
+account, have entity management enabled, and complete a PolicySync cycle before
+the corresponding Snowflake objects appear.
+
+The expected mapping is:
+
+| Privacera object | Snowflake object |
+| --- | --- |
+| User `analyst_user` | user `analyst_user` and role `priv_user_analyst_user` |
+| User `steward_user` | user `steward_user` and role `priv_user_steward_user` |
+| Group `analyst` | role `priv_group_analyst` |
+| Group `steward` | role `priv_group_steward` |
+
+Snowflake roles represent Privacera groups and roles; a Privacera group is not
+created as a separate Snowflake "group" object because Snowflake uses roles for
+that authorization relationship.
+
+**Diagnosis:** in Snowsight we identified the active organization and account:
+
+```sql
+SELECT
+  CURRENT_ORGANIZATION_NAME(),
+  CURRENT_ACCOUNT_NAME(),
+  CURRENT_ACCOUNT(),
+  CURRENT_REGION();
+```
+
+The active organization/account was `KBGSYGR/CS63822`, but the tracked
+connector configuration still pointed to the old account host
+`vxwhhxh-xx71666.snowflakecomputing.com`. The general
+`CONNECTOR_SNOWFLAKE_MANAGE_ENTITIES` setting was enabled, but the individual
+user/group/role operations were not explicit for this Privacera release.
+
+**Code changes:** the connector source of truth is
+[`custom-vars/connectors/snowflake/test/vars.connector.snowflake.yml`](custom-vars/connectors/snowflake/test/vars.connector.snowflake.yml).
+It was changed to use the current account endpoint and to explicitly enable
+each entity operation:
+
+```yaml
+CONNECTOR_SNOWFLAKE_JDBC_URL: "jdbc:snowflake://kbgsygr-cs63822.snowflakecomputing.com"
+CONNECTOR_SNOWFLAKE_MANAGE_ENTITIES: "true"
+CONNECTOR_SNOWFLAKE_MANAGE_USERS: "true"
+CONNECTOR_SNOWFLAKE_MANAGE_GROUPS: "true"
+CONNECTOR_SNOWFLAKE_MANAGE_ROLES: "true"
+CONNECTOR_SNOWFLAKE_CREATE_USER: "true"
+CONNECTOR_SNOWFLAKE_CREATE_USER_ROLE: "true"
+CONNECTOR_SNOWFLAKE_GRANT_UPDATES: "true"
+CONNECTOR_SNOWFLAKE_ENABLE: "true"
+```
+
+Passwords remain as `<PLEASE_CHANGE>` in Git. During the GitHub Actions run,
+[`scripts/render_snowflake_secrets.py`](scripts/render_snowflake_secrets.py)
+replaces those placeholders only in the runner's temporary Privacera
+configuration using `SNOWFLAKE_JDBC_PASSWORD` and
+`SNOWFLAKE_DEFAULT_USER_PASSWORD` from GitHub Secrets.
+
+**Why a redeployment was required:** changing the repository YAML does not
+modify the already-running connector. The install workflow copies `custom-vars`
+into Privacera Manager, injects the secrets, regenerates the Helm charts, and
+upgrades the connector release. We therefore committed and pushed the settings,
+ran **Privacera Manager Install**, and waited for the Snowflake connector's next
+PolicySync cycle. The observability/Grafana settings are unrelated to principal
+synchronization and are not required for this fix.
+
+Check the connector after a deployment:
+
+```bash
+kubectl get pods -n candidate-test | grep -i snowflake
+
+# Replace <snowflake-connector-pod> with the pod name returned above.
+kubectl logs -n candidate-test <snowflake-connector-pod> \
+  --all-containers --tail=300 | grep -Ei 'sync|user|group|role|error'
+```
+
+The successful run reported four users and five groups discovered with zero
+add, update, or remove failures. We then verified the exercise identities
+directly in Snowflake with this read-only query:
+
+```sql
+SELECT 'USER' AS object_type, name AS object_name
+FROM SNOWFLAKE.ACCOUNT_USAGE.USERS
+WHERE deleted_on IS NULL
+  AND UPPER(name) IN ('ANALYST_USER', 'STEWARD_USER')
+UNION ALL
+SELECT 'ROLE' AS object_type, name AS object_name
+FROM SNOWFLAKE.ACCOUNT_USAGE.ROLES
+WHERE deleted_on IS NULL
+  AND UPPER(name) IN (
+    'PRIV_USER_ANALYST_USER',
+    'PRIV_USER_STEWARD_USER',
+    'PRIV_GROUP_ANALYST',
+    'PRIV_GROUP_STEWARD'
+  )
+ORDER BY object_type, object_name;
+```
+
+The query returned all six expected objects: two Snowflake users and four
+Snowflake roles. `ACCOUNT_USAGE` can have reporting latency; when checking a
+newly created identity immediately, use `SHOW USERS` and `SHOW ROLES` as the
+real-time fallback.
+
+Future Privacera users/groups should synchronize automatically while the
+connector pod is healthy, the JDBC endpoint and credentials remain valid, and
+`PRIVACERA_POLICYSYNC_ROLE` retains the required account grants. There is no
+entity prefix filter in this development setup, so add
+`CONNECTOR_SNOWFLAKE_MANAGE_ENTITY_PREFIX` before production if only a
+controlled identity namespace should be synchronized.
+
 ## 15. Security decisions and production follow-up
 
 Implemented:
@@ -1095,7 +1207,245 @@ Before production:
 9. Back up stateful workloads and test restores.
 10. Define alerting, budgets, backup, RTO/RPO, and rotation procedures.
 
-## 16. Cost and cleanup
+## 16. Part 6: retrospective, troubleshooting, and interview handoff
+
+The standalone one-page version to bring to the interview is
+[`RETROSPECTIVE.md`](RETROSPECTIVE.md). This section contains the longer
+talking points and command-level troubleshooting runbook.
+
+### Five-minute retrospective talk track
+
+#### What went well
+
+1. **Clear ownership boundaries.** VPC and EKS use separate Terraform roots and
+   remote state, ARC/Privacera are managed through Helm and GitHub Actions, and
+   runtime credentials stay in GitHub or Snowflake instead of Git.
+2. **A defensible security baseline.** The environment uses private application
+   subnets, isolated database subnets, a restricted EKS endpoint, encrypted EBS
+   and Terraform state, EKS access entries, Pod Identity, IMDSv2, control-plane
+   logs, VPC Flow Logs, and no node SSH access.
+3. **Repeatable recovery.** Fixes for generated StorageClasses, Solr exporter,
+   secret rendering, and Helm-release validation are encoded in the workflow.
+   They are no longer undocumented commands applied only to the live cluster.
+4. **Evidence-based troubleshooting.** Kubernetes events exposed capacity and
+   EBS/AZ problems; container logs exposed the Solr HTTP/truststore mismatch;
+   PolicySync logs and direct Snowflake queries proved identity synchronization.
+5. **The integration works end to end.** The workflow completed, all 13 Helm
+   releases deployed, the portal became reachable, the Solr exporter became
+   healthy, encrypted gp3 claims bound through EBS CSI, and the expected
+   Privacera users/groups appeared in Snowflake.
+
+#### What cost the most time
+
+The largest time cost was not any single failed command; it was the mismatch
+between generated/vendor assumptions and this small development environment:
+
+- legacy in-tree EBS classes used `gp2` and `Immediate`, creating AZ-bound
+  volumes before pods were scheduled;
+- immutable StorageClass fields and old Helm release history made the first
+  permanent migration fail even after the live objects were corrected;
+- Free Plan-compatible `m7i-flex.large` nodes had little spare CPU, so the Solr
+  exporter could not schedule with its generated one-core request;
+- after scheduling, the exporter still failed because it used HTTPS against an
+  HTTP Solr service and referenced a truststore that did not exist;
+- the common Grafana dashboard job expected SSH access to a private GitLab
+  repository;
+- the original Snowflake JDBC endpoint targeted the wrong account, and entity
+  management needed explicit per-entity flags plus a full connector redeploy;
+- AWS organization SCPs blocked the intended AssumeRole/IRSA paths, requiring
+  temporary development alternatives.
+
+The lesson is that a green infrastructure plan or Helm command is not the
+customer outcome. Completion means the application is ready, storage is bound,
+connectors converge, and a real user operation succeeds.
+
+### Top three customer improvements
+
+| Improvement | What it would do | Customer impact | How success would be measured |
+| --- | --- | --- | --- |
+| **1. Three-minute preflight gate** | Validate AWS identity/SCP constraints, quotas and allowed EC2 types; EKS/Privacera compatibility; node allocatable capacity; CSI driver and StorageClass behavior; required secrets; registry/GitHub/Snowflake connectivity; JDBC identity; and Snowflake grants before installation. | Fail early with one actionable report instead of discovering prerequisites during a long deployment. | Preflight completes in under 3 minutes, detects every known failure from this exercise, has no secret values in output, and reduces time-to-first-success and prerequisite-related pipeline failures. |
+| **2. Idempotent deployment with explicit health gates** | Version the generated-chart compatibility transforms, use narrow/validated repairs, check every Helm release, wait for Deployments/StatefulSets/Jobs/PVCs, test the portal and connector, and make reruns produce the same result. | Removes manual cluster surgery, lowers recovery risk, and gives customers a trustworthy green pipeline. | Zero failed Helm releases, zero unexpected Pending PVCs/pods, successful synthetic portal/connector checks, no configuration drift on a second run, and a falling deployment MTTR. |
+| **3. Default support dashboard and runbook-linked alerts** | Ship node/pod/PVC/Helm coverage, portal and connector probes, useful dashboards, Alertmanager routing, and alerts linked to exact diagnostic commands and owners. Avoid a post-install dependency on a private Git repository. | A support engineer can identify the failing layer in one minute and respond without tribal knowledge. | Portal failure detected within 2 minutes, exercise recovery within 15 minutes, more than 90% actionable alerts, successful quarterly game days, and an agreed production portal availability SLO (for example 99.9%). |
+
+### Troubleshooting operating model
+
+For every incident, use the same sequence:
+
+1. **State impact:** who or what is affected, what still works, when it began,
+   and whether data/security is at risk.
+2. **Rank hypotheses:** list two or three likely causes based on the failure
+   boundary; do not change several unrelated things at once.
+3. **Collect evidence:** preserve the failed run, pod description, events,
+   logs, release state, relevant configuration version, and platform audit.
+4. **Mitigate safely:** choose the smallest reversible action; state the risk
+   before any storage deletion, rollback, credential rotation, or policy change.
+5. **Verify the customer outcome:** check readiness plus a synthetic user
+   transaction. A restarted pod alone is not proof of recovery.
+6. **Communicate on a cadence:** impact, known facts, current action, workaround,
+   and the time of the next update. Clearly label hypotheses as hypotheses.
+7. **Record follow-up:** keep the permanent fix in code and write a blameless
+   post-incident review.
+
+### Scenario: pods stuck in `Pending`
+
+Hypotheses, in order: insufficient CPU/memory, an unbound PVC or wrong
+StorageClass, EBS AZ affinity, taints/affinity constraints, then account quota.
+
+```bash
+kubectl get pods -n candidate-test -o wide
+kubectl describe pod <pod> -n candidate-test
+kubectl get events -n candidate-test --sort-by=.lastTimestamp
+kubectl top nodes
+kubectl describe nodes
+kubectl get pvc -n candidate-test
+kubectl get pv -o wide
+kubectl get storageclass -o yaml
+```
+
+State which scheduler message supports the hypothesis. Do not delete a PVC
+until its data value, reclaim policy, snapshot, and recovery plan are known.
+
+### Scenario: GitHub Actions pipeline fails
+
+First identify the exact failed step, then separate runner/bootstrap failures
+from registry, AWS, chart-generation, Helm, and post-deployment failures.
+
+```bash
+gh run list --workflow "Privacera Manager Install"
+gh run view <run-id> --log-failed
+gh run view <run-id> --json headSha,conclusion,jobs
+
+cd infra/dev/helm
+make verify
+make logs
+make events
+
+helm list -n candidate-test --all
+kubectl get pods,pvc,jobs -n candidate-test
+kubectl get events -n candidate-test --sort-by=.lastTimestamp
+```
+
+Confirm that required secret **names** exist, but never print their values.
+Preserve the failing run and commit SHA. Rerun only after correcting a specific
+cause; repeated retries are not a diagnosis.
+
+### Scenario: Snowflake connector does not synchronize
+
+Work from connection to authorization to convergence:
+
+1. Confirm the connector pod is ready and inspect its current and previous
+   logs.
+2. Confirm the JDBC host matches `CURRENT_ORGANIZATION_NAME()` and
+   `CURRENT_ACCOUNT_NAME()`.
+3. Validate the PolicySync service user, role, warehouse, database, and grants.
+4. Confirm entity management, grant updates, and PolicySync are enabled in the
+   rendered configuration without exposing passwords.
+5. Check Privacera's principal/policy version and wait for a full sync cycle.
+6. Use immediate `SHOW USERS`, `SHOW ROLES`, and `SHOW GRANTS` evidence in
+   Snowflake; do not rely only on latency-prone `ACCOUNT_USAGE` views.
+
+```bash
+kubectl get pods -n candidate-test | grep -i snowflake
+kubectl logs -n candidate-test <snowflake-connector-pod> \
+  --all-containers --tail=300
+kubectl logs -n candidate-test <snowflake-connector-pod> \
+  --all-containers --previous --tail=300
+```
+
+### Scenario: a user has the wrong access
+
+Check both the desired policy and Snowflake's native enforcement path:
+
+1. Capture the username, `CURRENT_ROLE()`, warehouse, exact SQL, result/error,
+   and expected behavior.
+2. Verify Privacera user, group, and nested-role membership. For the demo,
+   `demo_steward` is a member of `demo_reader`, so steward inherits reader—not
+   the reverse.
+3. Verify the policy service, case-sensitive resource hierarchy, enabled state,
+   role assignment, policy-item ordering, and last edit.
+4. Inspect PolicySync logs and native `SHOW GRANTS TO ROLE ...` output.
+5. Check Admin Audits for policy edits and Access Audits for the actual query.
+
+Snowflake does not support Privacera deny policies. Demonstrate restricted
+access by omitting an allow grant, and look for another native role that may be
+providing access before assuming the Privacera policy failed.
+
+### Customer update template
+
+```text
+Time: <time and timezone>
+Impact: <users/services affected and what still works>
+Known facts: <evidence only>
+Current hypothesis: <clearly marked hypothesis>
+Action in progress: <owner and safe next action>
+Workaround: <if available>
+Next update: <specific time even if there is no change>
+```
+
+Example: “The portal is available, but new Snowflake grants are not appearing
+for the two demo users. Existing access is unchanged and there is no evidence
+of data loss. The connector is healthy; we are validating its target account
+and latest PolicySync cycle. Next update in 15 minutes.”
+
+### Blameless post-incident review
+
+Use the following headings:
+
+1. Summary and customer impact
+2. Detection method and timeline
+3. Technical root cause and contributing conditions
+4. What worked and what made recovery harder
+5. Mitigation and proof of recovery
+6. Corrective actions with owner, priority, due date, and verification method
+7. Customer communication follow-up
+
+Describe system conditions, not individual fault. For the EBS incident, the
+root cause was generated legacy StorageClasses combined with multi-AZ
+scheduling and immutable Kubernetes fields—not “someone chose the wrong AZ.”
+The corrective action was a validated pre-deployment transformation plus
+release-state and storage health gates.
+
+### What to bring and demo-day checklist
+
+- [ ] Repository URL on the tested commit; `git status` clean and no secrets in
+      tracked files or history.
+- [ ] This README and the standalone [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
+- [ ] Successful GitHub Actions run URL and failed-run examples used to explain
+      troubleshooting.
+- [ ] Working EKS credentials, current `/32` endpoint allowlist, running nodes,
+      healthy Privacera pods, and all Helm releases deployed.
+- [ ] Portal, Snowflake, GitHub Actions, Grafana, and Alertmanager tabs signed in
+      and preloaded; start required port-forwards before the call.
+- [ ] RBAC proof: role hierarchy, two policies, analyst/steward allow and deny
+      results, native Snowflake grants, and matching audits.
+- [ ] Tag proof: both classification tags, one unchanged tag policy, before and
+      after resource-tag mappings, changed access, and Admin Audit entries.
+- [ ] Observability proof: targets, support dashboard, alert rules/routes, one
+      safe fault, detected symptom, root-cause evidence, recovery, and cleared
+      alert.
+- [ ] Screenshots or a short recording for every critical demo step in case the
+      network, Snowflake audit latency, or cluster fails during the interview.
+- [ ] No credentials visible in worksheets, screenshots, shell history, GitHub
+      logs, browser autofill, or screen-sharing notifications.
+
+Immediately before the demo:
+
+```bash
+git status --short
+gh run list --workflow "Privacera Manager Install" --limit 3
+kubectl get nodes
+kubectl get pods -n candidate-test
+kubectl get pvc -n candidate-test
+helm list -n candidate-test
+```
+
+Keep the portal port-forward running in a dedicated terminal:
+
+```bash
+kubectl port-forward -n candidate-test svc/portal 6868:6868
+```
+
+## 17. Cost and cleanup
 
 The main costs are EKS extended support, three NAT gateways, EC2 nodes, 300 GiB
 of node EBS, Privacera PVCs, VPC endpoints, CloudWatch, and data transfer. Free
@@ -1116,7 +1466,7 @@ For full cleanup:
 Destroy EKS before VPC because EKS depends on the network. EKS deletion
 protection intentionally prevents an accidental first destroy.
 
-## 17. Source documentation
+## 18. Source documentation
 
 - [Privacera compatibility and versions](https://docs.privacera.com/resources/infrastructure/compatibility-and-versions/compatibility-and-versions.html)
 - [Privacera Snowflake prerequisites](https://docs.privacera.com/connectors/snowflake/access/prerequisites.html)

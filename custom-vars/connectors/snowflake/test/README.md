@@ -9,7 +9,7 @@ connector instance. Its Snowflake objects are:
 | Warehouse | `PRIVACERA_POLICYSYNC_WH` |
 | Database | `PRIVACERA_DB` |
 | Service user | `PRIVACERA_POLICYSYNC_USER` |
-| JDBC host | `vxwhhxh-xx71666.snowflakecomputing.com` |
+| JDBC host | `kbgsygr-cs63822.snowflakecomputing.com` |
 
 ## 1. Create the Snowflake prerequisites
 
